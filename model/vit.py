@@ -9,7 +9,7 @@ class ViTForClassfication(nn.Module):
     The ViT model for classification.
     """
 
-    def __init__(self, config):
+    def __init__(self, config, attention_type = None):
         super().__init__()
 
         self.config = config
@@ -19,7 +19,7 @@ class ViTForClassfication(nn.Module):
         # Create the embedding module
         self.embedding = Embeddings(config)
         # Create the transformer encoder module
-        self.encoder = Encoder(config)
+        self.encoder = Encoder(config, attention_type = attention_type)
         # Create a linear layer to project the encoder's output to the number of classes
         self.classifier = nn.Linear(self.hidden_size, self.num_classes)
         # Initialize the weights

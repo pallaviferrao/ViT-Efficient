@@ -1,6 +1,6 @@
 from Layers.Attention.fast_multihead import FasterMultiHeadAttention
 from Layers.Attention.sparse_attention import FSparseMultiHeadAttention
-
+from Layers.Attention.moa_topk import MixtureOfAttention
 from torch import nn
 
 from Layers.mlp import MLP
@@ -10,16 +10,18 @@ class Block(nn.Module):
     A single transformer block.
     """
 
-    def __init__(self, config):
+    def __init__(self, config, attention_type):
         super().__init__()
         self.use_faster_attention = config.get("use_faster_attention", False)
-        if  self.use_faster_attention:
-            self.attention = FasterMultiHeadAttention(config)
-            # self.attention = MixtureOfAttention(config)
-        else:
-            # self.attention = MultiHeadAttention(config)
-            self.attention = FSparseMultiHeadAttention(config)
-            # self.attention = SparseAttention(6, attn_mode="strided", local_attn_ctx=5, blocksize=36)
+        if attention_type == 'moa':
+            self.attention = MixtureOfAttention(config)
+        # if  self.use_faster_attention:
+        #     self.attention = FasterMultiHeadAttention(config)
+        #     # self.attention = MixtureOfAttention(config)
+        # else:
+        #     # self.attention = MultiHeadAttention(config)
+        #     self.attention = FSparseMultiHeadAttention(config)
+        #     # self.attention = SparseAttention(6, attn_mode="strided", local_attn_ctx=5, blocksize=36)
         self.layernorm_1 = nn.LayerNorm(config["hidden_size"])
         self.mlp = MLP(config)
         self.layernorm_2 = nn.LayerNorm(config["hidden_size"])
