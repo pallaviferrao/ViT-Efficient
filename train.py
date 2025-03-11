@@ -1,14 +1,16 @@
 import torch
 from torch import nn, optim
 
+from model.vit import ViTForClassfication
 from utils import save_experiment, save_checkpoint
 from data import prepare_data
-from vit import ViTForClassfication
-from vit import MixtureOfAttention
+# from vit import ViTForClassfication
+# from vit import MixtureOfAttention
+from Layers.Attention.moa_topk import MixtureOfAttention
 
 from torch.profiler import profile, record_function, ProfilerActivity
 
-from fvcore.nn import FlopCountAnalysis, parameter_count_table
+# from fvcore.nn import FlopCountAnalysis, parameter_count_table
 
 config = {
     "patch_size": 4,  # Input image size: 32x32 -> 8x8 patches
