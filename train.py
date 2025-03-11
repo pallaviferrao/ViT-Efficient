@@ -2,8 +2,8 @@ import torch
 from torch import nn, optim
 
 from model.vit import ViTForClassfication
-from utils import save_experiment, save_checkpoint
-from data import prepare_data
+from Layers.utils import save_experiment, save_checkpoint
+from Layers.data import prepare_data
 # from vit import ViTForClassfication
 # from vit import MixtureOfAttention
 from Layers.Attention.moa_topk import MixtureOfAttention
