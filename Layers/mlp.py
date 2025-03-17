@@ -11,6 +11,7 @@ class MLP(nn.Module):
         super().__init__()
         self.dense_1 = nn.Linear(config["hidden_size"], config["intermediate_size"])
         self.activation = NewGELUActivation()
+        # self.activation = nn.SiLU()
         self.dense_2 = nn.Linear(config["intermediate_size"], config["hidden_size"])
         self.dropout = nn.Dropout(config["hidden_dropout_prob"])
 

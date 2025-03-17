@@ -13,7 +13,7 @@ class FasterMultiHeadAttention(nn.Module):
         super().__init__()
         self.hidden_size = config["hidden_size"]
         self.num_attention_heads = config["num_attention_heads"]
-        self.num_attention_heads = 6
+        # self.num_attention_heads = 6
         # The attention head size is the hidden size divided by the number of attention heads
         self.attention_head_size = self.hidden_size // self.num_attention_heads
         self.all_head_size = self.num_attention_heads * self.attention_head_size
@@ -27,7 +27,7 @@ class FasterMultiHeadAttention(nn.Module):
         self.output_projection = nn.Linear(self.all_head_size, self.hidden_size)
         self.output_dropout = nn.Dropout(config["hidden_dropout_prob"])
 
-    def forward(self, x, output_attentions=False):
+    def forward(self, x, output_attentions=False, is_training= False):
 
         # print("x shape", x.shape)
         # print("hidden size", self.hidden_size)

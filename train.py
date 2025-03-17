@@ -7,25 +7,27 @@ from Layers.data import prepare_data
 # from vit import ViTForClassfication
 # from vit import MixtureOfAttention
 from Layers.Attention.moa_topk import MixtureOfAttention
+from torch.optim.lr_scheduler import CosineAnnealingLR, SequentialLR, LinearLR
 
-from torch.profiler import profile, record_function, ProfilerActivity
+# from torch.profiler import profile, record_function, ProfilerActivity
 
 # from fvcore.nn import FlopCountAnalysis, parameter_count_table
 
 config = {
     "patch_size": 4,  # Input image size: 32x32 -> 8x8 patches
     "hidden_size": 48,
-    "num_hidden_layers": 4,
-    "num_attention_heads": 4,
+    "num_hidden_layers": 12,
+    "num_attention_heads": 8,
     "intermediate_size": 4 * 48,  # 4 * hidden_size
-    "hidden_dropout_prob": 0.0,
-    "attention_probs_dropout_prob": 0.0,
+    "hidden_dropout_prob": 0.1,
+    "attention_probs_dropout_prob": 0.1,
     "initializer_range": 0.02,
     "image_size": 32,
     "num_classes": 10,  # num_classes of CIFAR10
     "num_channels": 3,
     "qkv_bias": True,
     "use_faster_attention": True,
+    "attention-type":'multihead'
 }
 # These are not hard constraints, but are used to prevent misconfigurations
 assert config["hidden_size"] % config["num_attention_heads"] == 0
@@ -44,6 +46,9 @@ class Trainer:
         self.loss_fn = loss_fn
         self.exp_name = exp_name
         self.device = device
+        # warmup = LinearLR(optimizer, start_factor=0.1, total_iters=10)  # 5 epochs warmup
+        # cosine = CosineAnnealingLR(optimizer, T_max=30)
+        # self.scheduler = SequentialLR(optimizer, schedulers=[warmup, cosine], milestones=[10])
 
     def train(self, trainloader, testloader, epochs, save_model_every_n_epochs=0):
         """
@@ -82,14 +87,16 @@ class Trainer:
             # Calculate the loss
 
             loss = self.loss_fn(self.model(images, set_training_mode)[0], labels)
-            moh_loss = sum(MixtureOfAttention.LOAD_BALANCING_LOSSES) / max(len(MixtureOfAttention.LOAD_BALANCING_LOSSES), 1)
-            loss += moh_loss
-            # print("moh loss", moh_loss)
+            if(config["attention-type"] == "moa"):
+                moh_loss = sum(MixtureOfAttention.LOAD_BALANCING_LOSSES) / max(len(MixtureOfAttention.LOAD_BALANCING_LOSSES), 1)
+                loss += moh_loss
+                # print("moh loss", moh_loss)
             # Backpropagate the loss
             loss.backward()
 
             # Update the model's parameters
             self.optimizer.step()
+            # self.scheduler.step()
             # MixtureOfAttention.LOAD_BALANCING_LOSSES.clear()
             total_loss += loss.item() * len(images)
         return total_loss / len(trainloader.dataset)
@@ -142,6 +149,7 @@ def parse_args():
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--device", type=str)
     parser.add_argument("--save-model-every", type=int, default=0)
+    parser.add_argument("--attention-type", type=str, default='moa')
 
     args = parser.parse_args()
     if args.device is None:
@@ -153,8 +161,8 @@ def parse_args():
 def main():
     args = parse_args()
 
-    activities = [ProfilerActivity.CPU, ProfilerActivity.CUDA, ProfilerActivity.XPU]
-
+    # activities = [ProfilerActivity.CPU, ProfilerActivity.CUDA, ProfilerActivity.XPU]
+    config["attention-type"] = args.attention_type
     # Training parameters
     batch_size = args.batch_size
     epochs = args.epochs
@@ -164,8 +172,8 @@ def main():
     # Load the CIFAR10 dataset
     trainloader, testloader, _ = prepare_data(batch_size=batch_size)
     # Create the model, optimizer, loss function and trainer
-    model = ViTForClassfication(config)
-    optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-2)
+    model = ViTForClassfication(config, attention_type= args.attention_type)
+    optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=5e-2)
     loss_fn = nn.CrossEntropyLoss()
     trainer = Trainer(model, optimizer, loss_fn, args.exp_name, device=device)
     trainer.train(trainloader, testloader, epochs, save_model_every_n_epochs=save_model_every_n_epochs)

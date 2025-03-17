@@ -27,9 +27,12 @@ class FSparseMultiHeadAttention(nn.Module):
         # In most cases, all_head_size and hidden_size are the same
         self.output_projection = nn.Linear(self.all_head_size, self.hidden_size)
         self.output_dropout = nn.Dropout(config["hidden_dropout_prob"])
+        self.register_buffer("attn_mask", None)
 
+    def update_mask(self, n_timesteps):
+        self.attn_mask = self.get_attn_mask(n_timesteps, "both", local_attn_ctx=3).float()
 
-    def forward(self, x, output_attentions=False):
+    def forward(self, x, output_attentions=False, is_training=False):
         # print("x shape", x.shape)
         # print("hidden size", self.hidden_size)
         # Project the query, key, and value
@@ -50,10 +53,15 @@ class FSparseMultiHeadAttention(nn.Module):
         # softmax(Q*K.T/sqrt(head_size))*V
 
         n_timesteps = key.size()[2]
-        mask = self.get_attn_mask(n_timesteps, "strided", local_attn_ctx=3).float()
+
+        if self.attn_mask is None or self.attn_mask.shape[-1] != n_timesteps:  # Update if needed
+            self.update_mask(x.shape[1])
+
+        # self.register_buffer("cached_mask", self.get_attn_mask(n_timesteps, "both", local_attn_ctx=3).float())
+        # mask = self.get_attn_mask(n_timesteps, "both", local_attn_ctx=3).float()
         attention_scores = torch.matmul(query, key.transpose(-1, -2))
         attention_scores = attention_scores / math.sqrt(self.attention_head_size)
-        attention_scores = attention_scores * mask + -1e9 * (1 - mask)
+        attention_scores = attention_scores * self.attn_mask + -1e9 * (1 - self.attn_mask)
         attention_probs = nn.functional.softmax(attention_scores, dim=-1)
         attention_probs = self.attn_dropout(attention_probs)
         # Calculate the attention output
@@ -79,8 +87,9 @@ class FSparseMultiHeadAttention(nn.Module):
         elif attn_mode == 'local':
             bandwidth = local_attn_ctx
             ctx = min(n - 1, bandwidth - 1)
-            b = torch.tril(torch.ones([n, n]), ctx)
+            b = torch.logical_and(torch.tril(torch.ones([n, n]), ctx), torch.triu(torch.ones([n, n]), -ctx)).float()
         elif attn_mode == 'strided':
+            breakpoint()
             stride = local_attn_ctx
             x = torch.reshape(torch.arange(n, dtype=torch.int32), [n, 1])
             y = torch.transpose(x, 0, 1)
@@ -91,6 +100,20 @@ class FSparseMultiHeadAttention(nn.Module):
             c2 = torch.eq(torch.fmod(q - k, stride), 0)
             c3 = torch.logical_and(c1, c2)
             b = c3.float()
+        elif attn_mode == 'both':
+            stride = local_attn_ctx
+            x = torch.reshape(torch.arange(n, dtype=torch.int32), [n, 1])
+            y = torch.transpose(x, 0, 1)
+            z = torch.zeros([n, n], dtype=torch.int32)
+            q = z + x
+            k = z + y
+            c1 = q >= k
+            c2 = torch.eq(torch.fmod(q - k, stride), 0)
+            c3 = torch.logical_and(c1, c2)
+            bandwidth = local_attn_ctx
+            ctx = min(n - 1, bandwidth - 1)
+            a = torch.logical_and(torch.tril(torch.ones([n, n]), ctx), torch.triu(torch.ones([n, n]), -ctx))
+            b = torch.logical_or(a, c3).float()
         else:
             raise ValueError('Not yet implemented')
         b = torch.reshape(b, [1, 1, n, n])

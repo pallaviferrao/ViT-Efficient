@@ -21,7 +21,11 @@ class ViTForClassfication(nn.Module):
         # Create the transformer encoder module
         self.encoder = Encoder(config, attention_type = attention_type)
         # Create a linear layer to project the encoder's output to the number of classes
-        self.classifier = nn.Linear(self.hidden_size, self.num_classes)
+        # self.classifier = nn.Linear(self.hidden_size, self.num_classes)
+        self.classifier = nn.Sequential(
+            nn.LayerNorm(self.hidden_size),
+            nn.Linear(self.hidden_size, self.num_classes) # for cls_token
+        )
         # Initialize the weights
         self.apply(self._init_weights)
 
