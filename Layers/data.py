@@ -3,10 +3,12 @@ import torch
 import torchvision
 import torchvision.transforms as transforms
 
-def prepare_data(batch_size=4, num_workers=2, train_sample_size=None, test_sample_size=None):
+
+def prepare_data(batch_size=4, num_workers=1, train_sample_size=None, test_sample_size=None):
     train_transform = transforms.Compose(
         [transforms.ToTensor(),
          transforms.Resize((32, 32),  antialias=True),
+         # transforms.Resize((224, 224), antialias=True),
          transforms.RandomHorizontalFlip(p=0.5),
          transforms.ColorJitter(brightness=0.2),
          transforms.RandomResizedCrop((32, 32),  antialias=True, scale=(0.8, 1.0), ratio=(0.75, 1.3333333333333333), interpolation=2),
@@ -25,6 +27,7 @@ def prepare_data(batch_size=4, num_workers=2, train_sample_size=None, test_sampl
     test_transform = transforms.Compose(
         [transforms.ToTensor(),
          transforms.Resize((32, 32),  antialias=True),
+         # transforms.Resize((224, 224), antialias=True),
          transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
     testset = torchvision.datasets.CIFAR10(root='./data', train=False,

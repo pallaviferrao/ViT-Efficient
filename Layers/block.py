@@ -1,8 +1,11 @@
 from Layers.Attention.fast_multihead import FasterMultiHeadAttention
 from Layers.Attention.sparse_attention import FSparseMultiHeadAttention
-from Layers.Attention.moa_topk import MixtureOfAttention
+from Layers.Attention.moa_topp import MixtureOfAttention
 from Layers.Attention.sparse_moa_share import MixtureOfAttentionSparseShare
+from Layers.Attention.moa_topk import  MixtureOfAttentionTopk
+from Layers.Attention.Longformer.longformer import LongformerSelfAttention
 from torch import nn
+import torch.nn.functional as F
 
 from Layers.mlp import MLP
 
@@ -14,14 +17,19 @@ class Block(nn.Module):
     def __init__(self, config, attention_type):
         super().__init__()
         self.use_faster_attention = config.get("use_faster_attention", False)
+        self.attention_type = attention_type
         if attention_type == 'moa':
             self.attention = MixtureOfAttention(config)
+        if attention_type == 'moatopk':
+            self.attention = MixtureOfAttentionTopk(config)
         if attention_type == 'multihead':
             self.attention = FasterMultiHeadAttention(config)
         if attention_type == 'sparse':
             self.attention = FSparseMultiHeadAttention(config)
         if attention_type == 'moa-sparse-share':
             self.attention = MixtureOfAttentionSparseShare(config)
+        if attention_type == 'longformer':
+            self.attention = LongformerSelfAttention(config)
         # if  self.use_faster_attention:
         #     self.attention = FasterMultiHeadAttention(config)
         #     # self.attention = MixtureOfAttention(config)
@@ -65,6 +73,10 @@ class Block(nn.Module):
         # attention_output = self.attention(q, k, v)
 
         # Skip connection
+        if self.attention_type == "longformer":
+            attention_output = attention_output[:, :x.shape[1], :]
+            # Pad `x` along sequence dimension (dim=1) to match `attention_output` (length 72)
+            # x = F.pad(x, (0, 0, x.shape[1] - attention_output.shape[1], x.shape[1] - attention_output.shape[1]), value=0)  # Padding only on sequence length dimension
         x = x + attention_output
         # Feed-forward network
         mlp_output = self.mlp(self.layernorm_2(x))
