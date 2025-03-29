@@ -4,7 +4,7 @@ from torch import nn
 import torch.nn.functional as F
 import math
 
-class MixtureOfAttention(nn.Module):
+class MixtureOfAttentionTopk(nn.Module):
     LOAD_BALANCING_LOSSES = []
     def __init__(self, config):
         super().__init__()
@@ -53,7 +53,7 @@ class MixtureOfAttention(nn.Module):
         # ce = choose_attn_heads.float().mean(dim=0)
         # l_aux = torch.mean(me * ce) * num_experts * num_experts
 
-        MixtureOfAttention.LOAD_BALANCING_LOSSES.append(l_aux)
+        MixtureOfAttentionTopk.LOAD_BALANCING_LOSSES.append(l_aux)
 
 
         # if is_training:

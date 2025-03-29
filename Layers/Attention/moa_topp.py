@@ -1,10 +1,9 @@
-
 import torch
 from torch import nn
 import torch.nn.functional as F
 import math
 
-class MixtureOfAttentionSparseShare(nn.Module):
+class MixtureOfAttention(nn.Module):
     LOAD_BALANCING_LOSSES = []
     def __init__(self, config):
         super().__init__()
@@ -33,21 +32,39 @@ class MixtureOfAttentionSparseShare(nn.Module):
         self.routing_head = nn.Linear(self.hidden_size, self.total_routed_attention_heads)
         self.sharing_head = nn.Linear(self.hidden_size, self.shared_num)
         self.wg_0 = torch.nn.Linear(self.hidden_size, 2, bias=False)
-        self.register_buffer("attn_mask", None)
-
-    def update_mask(self, n_timesteps):
-        self.attn_mask = self.get_attn_mask(n_timesteps, "both", local_attn_ctx=3).float()
+        self.register_buffer("extra_column", None)
+        # Create an extra column of -1s
 
     def forward(self,x, output_attentions=False, is_training= False):
-        torch.cuda.empty_cache()
         B,N,C = x.shape
+        top_p = 0.75
         _x = x.reshape(B * N, C)
         logits = self.routing_head(_x)
         gates = F.softmax(logits, dim=-1)
+
+        # num_tokens, num_experts = gates.shape
+        # _, indices = torch.topk(gates, k=self.routed_head, dim=1)
+        # mask = F.one_hot(indices, num_classes=num_experts).sum(dim=1)
+        # print("index", indices[0])
         # choose_attn_heads = F.sigmoid(self.n_router(_x))
         num_tokens, num_experts = gates.shape
-        _, indices = torch.topk(gates, k=self.routed_head, dim=1)
-        mask = F.one_hot(indices, num_classes=num_experts).sum(dim=1)
+        sorted_probs, sorted_indices = torch.sort(gates, descending=True, dim=1)
+        # _, indices = torch.topk(gates, k=self.routed_head, dim=1)
+        cumulative_probs = torch.cumsum(sorted_probs, dim=-1)
+        mask = cumulative_probs > top_p
+        # mask = ~mask
+        threshold_indices = mask.long().argmax(dim=-1)
+        threshold_mask = torch.nn.functional.one_hot(threshold_indices, num_classes=sorted_indices.size(-1)).bool()
+        mask = mask & ~threshold_mask
+        sorted_indices = torch.where(mask, -1, sorted_indices)
+        self.extra_column = torch.full((sorted_indices.size(0), 1), -1).to(sorted_indices.device) # Create an extra column of -1s
+        sorted_indices = torch.cat((sorted_indices, self.extra_column), dim=1)
+        sorted_indices = sorted_indices +1
+        mask = torch.nn.functional.one_hot(sorted_indices, num_classes=sorted_indices.shape[1]).sum(dim=1)[:,1:]
+
+
+        # Find the threshold indices
+        # mask = F.one_hot(sorted_indices, num_classes=sorted_indices.size(-1)).sum(dim=1)
 
         me = gates.mean(dim=0)
         ce = mask.float().mean(dim=0)
@@ -57,7 +74,7 @@ class MixtureOfAttentionSparseShare(nn.Module):
         # ce = choose_attn_heads.float().mean(dim=0)
         # l_aux = torch.mean(me * ce) * num_experts * num_experts
 
-        MixtureOfAttentionSparseShare.LOAD_BALANCING_LOSSES.append(l_aux)
+        MixtureOfAttention.LOAD_BALANCING_LOSSES.append(l_aux)
 
 
         # if is_training:
@@ -94,32 +111,6 @@ class MixtureOfAttentionSparseShare(nn.Module):
         attention_scores = attention_scores / math.sqrt(self.attention_head_size)
         attention_probs = nn.functional.softmax(attention_scores, dim=-1)
         attention_probs = self.attn_dropout(attention_probs)
-        n_timesteps = key.size()[2]
-        if self.attn_mask is None or self.attn_mask.shape[-1] != n_timesteps:  # Update if needed
-            self.update_mask(n_timesteps)
-
-        device = attention_probs.device  # Ensure everything is on the same device
-
-        self.attn_mask = self.attn_mask.to(device)  # Move mask to the same device
-        # self.attn_mask = self.attn_mask.to(attention_probs.dtype)
-        # mask2 = self.get_attn_mask(N, "both", local_attn_ctx=3).float()
-        # mask2 = mask2.to(attention_probs.device)
-        # attention_probs = torch.cat((attention_probs[:, :self.shared_num, :, :],
-        #    attention_probs[:, self.shared_num:, :, :] * mask2), dim=1)
-
-        # attention_probs = torch.cat((attention_probs[:, :self.shared_num, :, :],
-        #    attention_probs[:, self.shared_num:, :, :].masked_fill(self.attn_mask == 0, 0)), dim=1)
-
-        self.attn_mask = self.attn_mask.to(attention_probs.dtype)
-        # attention_probs[:, self.shared_num:, :, :] = attention_probs[:, self.shared_num:, :, :].masked_fill(self.attn_mask == 0, 0)
-        # attention_probs = torch.cat(
-        #     (attention_probs[:, :self.shared_num, :, :],
-        #      attention_probs[:, self.shared_num:, :, :].masked_fill(self.attn_mask == 0, 0)), dim=1
-        # )
-
-
-        attention_probs[:, self.shared_num:, :, :].masked_fill_(self.attn_mask == 0, 0)
-
         # Calculate the attention output
         attention_output = torch.matmul(attention_probs, value)
         # Resize the attention output
@@ -131,8 +122,6 @@ class MixtureOfAttentionSparseShare(nn.Module):
         attention_output = attention_output.transpose(1, 2)
 
         shared_head_weight = self.sharing_head(_x)
-
-
         shared_head_gates = F.softmax(shared_head_weight, dim=-1).reshape(B, N, -1) * self.shared_num
         weight_0 = self.wg_0(_x)
         weight_0 = F.softmax(weight_0, dim=-1).reshape(B, N, 2) * 2
@@ -140,7 +129,6 @@ class MixtureOfAttentionSparseShare(nn.Module):
         routed_head_gates = torch.einsum("bn,bne->bne", weight_0[:, :, 1], routed_head_gates)
         # print("shared shape", shared_head_gates[0][0])
         # masked_gates = torch.cat([shared_head_gates, routed_head_gates], dim=2).repeat_interleave(self.attention_head_size, dim=2)
-        # shared_head_gates = shared_head_gates * mask + -1e9 * (1 - mask)
         masked_gates = torch.cat([shared_head_gates, routed_head_gates], dim=2)
         # print("shape masked",masked_gates.shape)
         # print("x masked", masked_gates.shape)
@@ -154,48 +142,7 @@ class MixtureOfAttentionSparseShare(nn.Module):
         attention_output = self.output_projection(attention_output)
         attention_output = self.output_dropout(attention_output)
         # Return the attention output and the attention probabilities (optional)
-        #
-        del logits, gates, indices, mask, routed_head_gates
-        torch.cuda.empty_cache()
-
         if not output_attentions:
             return (attention_output, None)
         else:
             return (attention_output, attention_probs)
-
-    def get_attn_mask(self, n, attn_mode, local_attn_ctx=None):
-        if attn_mode == 'all':
-            b = torch.tril(torch.ones([n, n]))
-        elif attn_mode == 'local':
-            bandwidth = local_attn_ctx
-            ctx = min(n - 1, bandwidth - 1)
-            b = torch.logical_and(torch.tril(torch.ones([n, n]), ctx), torch.triu(torch.ones([n, n]), -ctx)).float()
-        elif attn_mode == 'strided':
-            stride = local_attn_ctx
-            x = torch.reshape(torch.arange(n, dtype=torch.int32), [n, 1])
-            y = torch.transpose(x, 0, 1)
-            z = torch.zeros([n, n], dtype=torch.int32)
-            q = z + x
-            k = z + y
-            c1 = q >= k
-            c2 = torch.eq(torch.fmod(q - k, stride), 0)
-            c3 = torch.logical_and(c1, c2)
-            b = c3.float()
-        elif attn_mode == 'both':
-            stride = local_attn_ctx
-            x = torch.reshape(torch.arange(n, dtype=torch.int32), [n, 1])
-            y = torch.transpose(x, 0, 1)
-            z = torch.zeros([n, n], dtype=torch.int32)
-            q = z + x
-            k = z + y
-            c1 = q >= k
-            c2 = torch.eq(torch.fmod(q - k, stride), 0)
-            c3 = torch.logical_and(c1, c2)
-            bandwidth = local_attn_ctx
-            ctx = min(n - 1, bandwidth - 1)
-            a = torch.logical_and(torch.tril(torch.ones([n, n]), ctx), torch.triu(torch.ones([n, n]), -ctx))
-            b = torch.logical_or(a, c3).float()
-        else:
-            raise ValueError('Not yet implemented')
-        b = torch.reshape(b, [1, 1, n, n])
-        return b
