@@ -2,6 +2,8 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 import math
+import numpy as np
+
 
 class MixtureOfAttention(nn.Module):
     LOAD_BALANCING_LOSSES = []
@@ -34,6 +36,9 @@ class MixtureOfAttention(nn.Module):
         self.wg_0 = torch.nn.Linear(self.hidden_size, 2, bias=False)
         self.register_buffer("extra_column", None)
         # Create an extra column of -1s
+
+    def calculate_sparsity(self, matrix):
+        return np.count_nonzero(matrix == 0) / matrix.numel()
 
     def forward(self,x, output_attentions=False, is_training= False):
         B,N,C = x.shape
@@ -110,7 +115,10 @@ class MixtureOfAttention(nn.Module):
         attention_scores = torch.matmul(query, key.transpose(-1, -2))
         attention_scores = attention_scores / math.sqrt(self.attention_head_size)
         attention_probs = nn.functional.softmax(attention_scores, dim=-1)
+        print("sparsity percentage", self.calculate_sparsity(attention_probs))
+
         attention_probs = self.attn_dropout(attention_probs)
+
         # Calculate the attention output
         attention_output = torch.matmul(attention_probs, value)
         # Resize the attention output

@@ -6,6 +6,7 @@ import torch.nn.functional as F
 from Layers.Attention.Longformer.diagonal_tvm import mask_invalid_locations
 from Layers.Attention.Longformer.sliding_chunks import sliding_chunks_matmul_qk, sliding_chunks_matmul_pv
 from Layers.Attention.Longformer.sliding_chunks import sliding_chunks_no_overlap_matmul_qk, sliding_chunks_no_overlap_matmul_pv
+import numpy as np
 
 class LongformerSelfAttention(nn.Module):
     def __init__(self, config):
@@ -48,6 +49,8 @@ class LongformerSelfAttention(nn.Module):
         if self.attention_mode in ['sliding_chunks', 'sliding_chunks_no_overlap']:
             assert not self.autoregressive  # not supported
             assert self.attention_dilation == 1  # dilation is not supported
+    def calculate_sparsity(self, matrix):
+        return np.count_nonzero(matrix == 0)/matrix.numel()
 
     def forward(
         self,
@@ -167,6 +170,7 @@ class LongformerSelfAttention(nn.Module):
             # softmax sometimes inserts NaN if all positions are masked, replace them with 0
             attn_weights_float = torch.masked_fill(attn_weights_float, key_padding_mask.unsqueeze(-1).unsqueeze(-1), 0.0)
         attn_weights = attn_weights_float.type_as(attn_weights)
+        print("sparsity percentage", self.calculate_sparsity(attn_weights))
         attn_probs = F.dropout(attn_weights_float.type_as(attn_weights), p=self.dropout, training=self.training)
         v = v.view(padded_seq_len, bsz, self.num_heads, self.head_dim).transpose(0, 1)
         attn = 0
@@ -218,6 +222,7 @@ class LongformerSelfAttention(nn.Module):
             attn_weights = attn_weights.view(bsz * self.num_heads, max_num_extra_indices_per_batch, seq_len)
             attn_weights_float = F.softmax(attn_weights, dim=-1, dtype=torch.float32)  # use fp32 for numerical stability
             attn_probs = F.dropout(attn_weights_float.type_as(attn_weights), p=self.dropout, training=self.training)
+            attn_weights = attn_weights_float.type_as(attn_weights)
             selected_attn = torch.bmm(attn_probs, v)
             assert list(selected_attn.size()) == [bsz * self.num_heads, max_num_extra_indices_per_batch, self.head_dim]
 

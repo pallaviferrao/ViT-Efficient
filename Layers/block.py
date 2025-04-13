@@ -4,6 +4,8 @@ from Layers.Attention.moa_topp import MixtureOfAttention
 from Layers.Attention.sparse_moa_share import MixtureOfAttentionSparseShare
 from Layers.Attention.moa_topk import  MixtureOfAttentionTopk
 from Layers.Attention.Longformer.longformer import LongformerSelfAttention
+from Layers.Attention.heterogenous_sparse_moa import MixtureOfAttentionHeterogenousSparseShare
+from Layers.Attention.heterogenous_topp import MixtureOfAttentionHeterogenousToppSparseShare
 from torch import nn
 import torch.nn.functional as F
 
@@ -30,6 +32,10 @@ class Block(nn.Module):
             self.attention = MixtureOfAttentionSparseShare(config)
         if attention_type == 'longformer':
             self.attention = LongformerSelfAttention(config)
+        if attention_type == 'heterogenous':
+            self.attention = MixtureOfAttentionHeterogenousSparseShare(config)
+        if attention_type == 'heterogenous-topp':
+            self.attention = MixtureOfAttentionHeterogenousToppSparseShare(config)
         # if  self.use_faster_attention:
         #     self.attention = FasterMultiHeadAttention(config)
         #     # self.attention = MixtureOfAttention(config)
