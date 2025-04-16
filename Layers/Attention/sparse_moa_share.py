@@ -3,6 +3,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 import math
+import numpy as np
 
 class MixtureOfAttentionSparseShare(nn.Module):
     LOAD_BALANCING_LOSSES = []
@@ -37,6 +38,9 @@ class MixtureOfAttentionSparseShare(nn.Module):
 
     def update_mask(self, n_timesteps):
         self.attn_mask = self.get_attn_mask(n_timesteps, "both", local_attn_ctx=3).float()
+
+    def calculate_sparsity(self, matrix):
+        return np.count_nonzero(matrix == 0) / matrix.numel()
 
     def forward(self,x, output_attentions=False, is_training= False):
         torch.cuda.empty_cache()
@@ -98,28 +102,30 @@ class MixtureOfAttentionSparseShare(nn.Module):
         if self.attn_mask is None or self.attn_mask.shape[-1] != n_timesteps:  # Update if needed
             self.update_mask(n_timesteps)
 
-        device = attention_probs.device  # Ensure everything is on the same device
+        # device = attention_probs.device  # Ensure everything is on the same device
 
-        self.attn_mask = self.attn_mask.to(device)  # Move mask to the same device
+        # self.attn_mask = self.attn_mask.to(device)  # Move mask to the same device
         # self.attn_mask = self.attn_mask.to(attention_probs.dtype)
         # mask2 = self.get_attn_mask(N, "both", local_attn_ctx=3).float()
         # mask2 = mask2.to(attention_probs.device)
         # attention_probs = torch.cat((attention_probs[:, :self.shared_num, :, :],
         #    attention_probs[:, self.shared_num:, :, :] * mask2), dim=1)
 
-        # attention_probs = torch.cat((attention_probs[:, :self.shared_num, :, :],
-        #    attention_probs[:, self.shared_num:, :, :].masked_fill(self.attn_mask == 0, 0)), dim=1)
+        attention_probs = torch.cat((attention_probs[:, :self.shared_num, :, :],
+           attention_probs[:, self.shared_num:, :, :].masked_fill(self.attn_mask == 0, 0)), dim=1)
 
-        self.attn_mask = self.attn_mask.to(attention_probs.dtype)
+        # self.attn_mask = self.attn_mask.to(attention_probs.dtype)
         # attention_probs[:, self.shared_num:, :, :] = attention_probs[:, self.shared_num:, :, :].masked_fill(self.attn_mask == 0, 0)
         # attention_probs = torch.cat(
         #     (attention_probs[:, :self.shared_num, :, :],
         #      attention_probs[:, self.shared_num:, :, :].masked_fill(self.attn_mask == 0, 0)), dim=1
         # )
 
-
-        attention_probs[:, self.shared_num:, :, :].masked_fill_(self.attn_mask == 0, 0)
-
+        # attention_probs[:, self.shared_num:, :, :] = torch.where(
+        #     self.attn_mask == 0, torch.tensor(0.0, device=attention_probs.device, dtype=attention_probs.dtype),
+        #     attention_probs[:, self.shared_num:, :, :]
+        # )
+        print("sparsity percentage", self.calculate_sparsity(attention_probs))
         # Calculate the attention output
         attention_output = torch.matmul(attention_probs, value)
         # Resize the attention output
@@ -154,9 +160,6 @@ class MixtureOfAttentionSparseShare(nn.Module):
         attention_output = self.output_projection(attention_output)
         attention_output = self.output_dropout(attention_output)
         # Return the attention output and the attention probabilities (optional)
-        #
-        del logits, gates, indices, mask, routed_head_gates
-        torch.cuda.empty_cache()
 
         if not output_attentions:
             return (attention_output, None)

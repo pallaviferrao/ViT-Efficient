@@ -1,4 +1,4 @@
-from Layers.data import prepare_data
+from Layers.datafinetune import prepare_data
 from transformers import ViTForImageClassification, ViTImageProcessor
 from Layers.Attention.vit_finetune import ViTSelfAttention
 from Layers.Attention.vit_finetune_route import ViTSelfAttentionRoute
@@ -78,9 +78,9 @@ def print_modules(model, device, config=None, ):
             model._modules[name] = print_modules(module, device, config)
 
         if name == 'attention':
-            print("Is instance", module)
+            # print("Is instance", module)
             model._modules[name] = ViTSelfAttentionRoute(config).to(device)
-            print("Is instance", name, model._modules[name])
+            # print("Is instance", name, model._modules[name])
     return model
 
 
@@ -92,11 +92,11 @@ def main():
     num_classes = 10
 
     # Define hyperparameters
-    batch_size = 4
+    batch_size = 32
     learning_rate = 2e-5
     num_epochs = 10
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    trainloader, testloader, classes = prepare_data(batch_size=4)
+    trainloader, testloader, classes = prepare_data(batch_size=32)
     metric_name = "accuracy"
 
     # Load pre-trained ViT model

@@ -2,6 +2,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 import math
+import numpy as np
 
 class FasterMultiHeadAttention(nn.Module):
     """
@@ -27,6 +28,9 @@ class FasterMultiHeadAttention(nn.Module):
         self.output_projection = nn.Linear(self.all_head_size, self.hidden_size)
         self.output_dropout = nn.Dropout(config["hidden_dropout_prob"])
 
+    def calculate_sparsity(self, matrix):
+        return np.count_nonzero(matrix == 0)/matrix.numel()
+
     def forward(self, x, output_attentions=False, is_training= False):
 
         # print("x shape", x.shape)
@@ -49,6 +53,7 @@ class FasterMultiHeadAttention(nn.Module):
         attention_scores = torch.matmul(query, key.transpose(-1, -2))
         attention_scores = attention_scores / math.sqrt(self.attention_head_size)
         attention_probs = nn.functional.softmax(attention_scores, dim=-1)
+        print("sparsity percentage", self.calculate_sparsity(attention_probs))
         attention_probs = self.attn_dropout(attention_probs)
         # Calculate the attention output
         attention_output = torch.matmul(attention_probs, value)

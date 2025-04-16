@@ -1,7 +1,6 @@
 from Layers.datafinetune import prepare_data
 from transformers import ViTForImageClassification, ViTImageProcessor
 from Layers.Attention.vit_finetune import ViTSelfAttention
-from Layers.Attention.vit_finetune_route import ViTSelfAttentionRoute
 import torch
 import numpy as np
 
@@ -16,16 +15,16 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device):
 
     for images, labels in tqdm(dataloader):
         images, labels = images.to(device), labels.to(device)
-        ViTSelfAttentionRoute.LOAD_BALANCING_LOSSES.clear()
+        # ViTSelfAttentionRoute.LOAD_BALANCING_LOSSES.clear()
         # Zero the parameter gradients
         optimizer.zero_grad()
 
         # Forward pass
         outputs = model(images).logits
         loss = criterion(outputs, labels)
-        moh_loss = sum(ViTSelfAttentionRoute.LOAD_BALANCING_LOSSES) / max(
-            len(ViTSelfAttentionRoute.LOAD_BALANCING_LOSSES), 1)
-        loss += moh_loss
+        # moh_loss = sum(ViTSelfAttention.LOAD_BALANCING_LOSSES) / max(
+        #     len(ViTSelfAttentionRoute.LOAD_BALANCING_LOSSES), 1)
+        # loss += moh_loss
 
         # Backward pass and optimize
         loss.backward()
@@ -79,7 +78,7 @@ def print_modules(model, device, config=None, ):
 
         if name == 'attention':
             # print("Is instance", module)
-            model._modules[name] = ViTSelfAttentionRoute(config).to(device)
+            model._modules[name] = ViTSelfAttention(config).to(device)
             # print("Is instance", name, model._modules[name])
     return model
 

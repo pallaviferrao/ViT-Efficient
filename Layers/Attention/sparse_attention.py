@@ -64,6 +64,8 @@ class FSparseMultiHeadAttention(nn.Module):
         attention_scores = attention_scores * self.attn_mask + -1e9 * (1 - self.attn_mask)
         attention_probs = nn.functional.softmax(attention_scores, dim=-1)
         attention_probs = self.attn_dropout(attention_probs)
+        print("sparsity percentage", self.calculate_sparsity(attention_probs))
+
         # Calculate the attention output
         attention_output = torch.matmul(attention_probs, value)
         # Resize the attention output
